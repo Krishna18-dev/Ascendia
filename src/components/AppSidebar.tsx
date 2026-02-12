@@ -1,4 +1,4 @@
-import { MessageSquare, FileText, Briefcase, Gamepad2, User, LogOut, Home, ArrowLeft } from "lucide-react";
+import { MessageSquare, FileText, Briefcase, Gamepad2, User, LogOut, Home, ArrowLeft, Youtube } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useAuth } from "@/contexts/AuthContext";
 import { Link } from "react-router-dom";
@@ -19,6 +19,7 @@ const menuItems = [
   { title: "Content Generator", url: "/study/content", icon: FileText },
   { title: "Mock Interview", url: "/study/interview", icon: Briefcase },
   { title: "Learning Games", url: "/study/games", icon: Gamepad2 },
+  { title: "Video Notes", url: "/study/video-notes", icon: Youtube },
   { title: "Profile", url: "/profile", icon: User },
 ];
 
