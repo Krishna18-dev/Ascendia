@@ -1,9 +1,11 @@
 import { useState, useRef, useEffect } from "react";
-import { Sparkles, Send, Loader2 } from "lucide-react";
+import { Sparkles, Send, Loader2, Mic, MicOff } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import MarkdownRenderer from "@/components/MarkdownRenderer";
+import { useSpeechToText } from "@/hooks/useSpeech";
 
 interface Message {
   role: "user" | "assistant";
@@ -20,6 +22,9 @@ const ChatPage = () => {
   const [message, setMessage] = useState("");
   const [isTyping, setIsTyping] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const { isListening, transcript, isSupported: sttSupported, startListening, stopListening } = useSpeechToText({
+    onTranscript: (text) => setMessage((prev) => (prev + " " + text).trim()),
+  });
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -103,7 +108,11 @@ const ChatPage = () => {
                     : "bg-muted"
                 }`}
               >
-                <p className="text-sm leading-relaxed whitespace-pre-wrap">{msg.content}</p>
+                {msg.role === "assistant" ? (
+                  <MarkdownRenderer content={msg.content} className="text-sm" />
+                ) : (
+                  <p className="text-sm leading-relaxed whitespace-pre-wrap">{msg.content}</p>
+                )}
               </div>
             </div>
           ))}
@@ -146,7 +155,23 @@ const ChatPage = () => {
 
       <div className="border-t bg-background">
         <div className="max-w-4xl mx-auto p-4">
+          {isListening && transcript && (
+            <div className="mb-2 px-3 py-2 rounded-lg bg-primary/10 border border-primary/20 text-sm text-muted-foreground animate-pulse">
+              🎙️ {transcript}
+            </div>
+          )}
           <div className="flex gap-2">
+            {sttSupported && (
+              <Button
+                variant={isListening ? "destructive" : "outline"}
+                size="icon"
+                onClick={isListening ? stopListening : startListening}
+                disabled={isTyping}
+                title={isListening ? "Stop recording" : "Start recording"}
+              >
+                {isListening ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
+              </Button>
+            )}
             <Input
               value={message}
               onChange={(e) => setMessage(e.target.value)}

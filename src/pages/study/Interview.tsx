@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Briefcase, Info, Loader2, ArrowRight, CheckCircle, ThumbsUp } from "lucide-react";
+import { Briefcase, Info, Loader2, ArrowRight, CheckCircle, ThumbsUp, Mic, MicOff, Volume2, VolumeX } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,6 +9,8 @@ import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
 import { motion, AnimatePresence } from "framer-motion";
 import { supabase } from "@/integrations/supabase/client";
+import MarkdownRenderer from "@/components/MarkdownRenderer";
+import { useSpeechToText, useTextToSpeech } from "@/hooks/useSpeech";
 
 interface Question {
   question: string;
@@ -34,6 +36,11 @@ const Interview = () => {
   const [currentAnswer, setCurrentAnswer] = useState("");
   const [showHints, setShowHints] = useState(false);
   const [evaluating, setEvaluating] = useState(false);
+
+  const { isSpeaking, isSupported: ttsSupported, speak, stop: stopSpeaking } = useTextToSpeech();
+  const { isListening, transcript, isSupported: sttSupported, startListening, stopListening } = useSpeechToText({
+    onTranscript: (text) => setCurrentAnswer((prev) => (prev + " " + text).trim()),
+  });
 
   const difficultyLevels = [
     { value: "easy", label: "Easy", description: "5 basic questions" },
@@ -77,16 +84,22 @@ const Interview = () => {
       }
 
       const data = await response.json();
+      const questions = Array.isArray(data.questions) ? data.questions : [];
       setInterview({
         jobRole,
         difficulty,
-        questions: Array.isArray(data.questions) ? data.questions : [],
+        questions,
         currentQuestionIndex: 0,
         answers: [],
         feedback: [],
         isComplete: false,
       });
       toast.success("Interview started!");
+
+      // Read first question aloud
+      if (ttsSupported && questions.length > 0) {
+        speak(questions[0].question);
+      }
     } catch (error) {
       console.error("Error starting interview:", error);
       toast.error(error instanceof Error ? error.message : "Failed to start interview");
@@ -140,17 +153,24 @@ const Interview = () => {
       const newFeedback = [...interview.feedback, data.feedback];
       const isLastQuestion = interview.currentQuestionIndex === interview.questions.length - 1;
 
+      const nextIndex = isLastQuestion ? interview.currentQuestionIndex : interview.currentQuestionIndex + 1;
+
       setInterview({
         ...interview,
         answers: newAnswers,
         feedback: newFeedback,
-        currentQuestionIndex: isLastQuestion ? interview.currentQuestionIndex : interview.currentQuestionIndex + 1,
+        currentQuestionIndex: nextIndex,
         isComplete: isLastQuestion,
       });
       
       setCurrentAnswer("");
       setShowHints(false);
       toast.success(isLastQuestion ? "Interview complete!" : "Answer submitted!");
+
+      // Read next question aloud
+      if (!isLastQuestion && ttsSupported) {
+        speak(interview.questions[nextIndex].question);
+      }
     } catch (error) {
       console.error("Error submitting answer:", error);
       toast.error("Failed to evaluate answer");
@@ -160,6 +180,7 @@ const Interview = () => {
   };
 
   const resetInterview = () => {
+    stopSpeaking();
     setInterview(null);
     setCurrentAnswer("");
     setShowHints(false);
@@ -225,7 +246,7 @@ const Interview = () => {
                       <li>• Take your time to think before answering</li>
                       <li>• Use specific examples from your experience</li>
                       <li>• Structure answers using the STAR method</li>
-                      <li>• Be honest and authentic</li>
+                      <li>• Use the 🎙️ mic button to speak your answers</li>
                     </ul>
                   </div>
                 </div>
@@ -286,7 +307,7 @@ const Interview = () => {
                         <strong>Your Answer:</strong> {interview.answers[index]}
                       </p>
                       <div className="bg-muted p-4 rounded-lg">
-                        <p className="text-sm whitespace-pre-wrap">{interview.feedback[index]}</p>
+                        <MarkdownRenderer content={interview.feedback[index] || ""} className="text-sm" />
                       </div>
                     </div>
                   </div>
@@ -341,6 +362,16 @@ const Interview = () => {
                     <span className="px-3 py-1 rounded-full bg-primary/10 text-primary text-sm font-medium">
                       {currentQuestion.type}
                     </span>
+                    {ttsSupported && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => isSpeaking ? stopSpeaking() : speak(currentQuestion.question)}
+                        title={isSpeaking ? "Stop reading" : "Read question aloud"}
+                      >
+                        {isSpeaking ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
+                      </Button>
+                    )}
                   </div>
                   <h2 className="text-2xl font-semibold mb-4">{currentQuestion.question}</h2>
                 </div>
@@ -363,11 +394,17 @@ const Interview = () => {
                   </motion.div>
                 )}
 
+                {isListening && transcript && (
+                  <div className="px-3 py-2 rounded-lg bg-primary/10 border border-primary/20 text-sm text-muted-foreground animate-pulse">
+                    🎙️ Listening: {transcript}
+                  </div>
+                )}
+
                 <div className="space-y-2">
                   <Label htmlFor="answer">Your Answer</Label>
                   <Textarea
                     id="answer"
-                    placeholder="Type your answer here... Use the STAR method for behavioral questions: Situation, Task, Action, Result"
+                    placeholder="Type your answer or use the mic button to speak..."
                     value={currentAnswer}
                     onChange={(e) => setCurrentAnswer(e.target.value)}
                     rows={8}
@@ -375,6 +412,25 @@ const Interview = () => {
                 </div>
 
                 <div className="flex gap-3">
+                  {sttSupported && (
+                    <Button
+                      variant={isListening ? "destructive" : "outline"}
+                      onClick={isListening ? stopListening : startListening}
+                      disabled={evaluating}
+                    >
+                      {isListening ? (
+                        <>
+                          <MicOff className="mr-2 h-4 w-4" />
+                          Stop Recording
+                        </>
+                      ) : (
+                        <>
+                          <Mic className="mr-2 h-4 w-4" />
+                          Speak Answer
+                        </>
+                      )}
+                    </Button>
+                  )}
                   {!showHints && (
                     <Button
                       variant="outline"

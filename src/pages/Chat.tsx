@@ -6,6 +6,7 @@ import { Send, Sparkles, Lightbulb, Target, Zap, Youtube, Loader2 } from "lucide
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
+import MarkdownRenderer from "@/components/MarkdownRenderer";
 
 interface Message {
   role: "user" | "assistant";
@@ -180,7 +181,11 @@ const Chat = () => {
                       : "bg-muted"
                   }`}
                 >
-                  <p className="text-sm leading-relaxed whitespace-pre-wrap">{message.content}</p>
+                  {message.role === "assistant" ? (
+                    <MarkdownRenderer content={message.content} className="text-sm" />
+                  ) : (
+                    <p className="text-sm leading-relaxed whitespace-pre-wrap">{message.content}</p>
+                  )}
 
                   {/* Suggestions */}
                   {message.suggestions && message.role === "assistant" && (

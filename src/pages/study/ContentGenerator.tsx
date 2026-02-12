@@ -10,6 +10,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
 import { motion } from "framer-motion";
 import { supabase } from "@/integrations/supabase/client";
+import MarkdownRenderer from "@/components/MarkdownRenderer";
 
 const contentTypes = [
   {
@@ -264,9 +265,7 @@ const ContentGenerator = () => {
                 </div>
 
                 <div className="bg-muted p-6 rounded-lg max-h-[500px] overflow-y-auto">
-                  <pre className="whitespace-pre-wrap font-sans text-sm">
-                    {generatedContent}
-                  </pre>
+                  <MarkdownRenderer content={generatedContent} className="text-sm" />
                 </div>
               </div>
             )}
