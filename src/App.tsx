@@ -28,6 +28,7 @@ import ChatPage from "./pages/study/ChatPage";
 import ContentGenerator from "./pages/study/ContentGenerator";
 import Interview from "./pages/study/Interview";
 import LearningGames from "./pages/study/LearningGames";
+import VideoNotes from "./pages/study/VideoNotes";
 
 const queryClient = new QueryClient();
 
@@ -243,6 +244,16 @@ const AnimatedRoutes = () => {
             <PageWrapper>
               <StudyLayout>
                 <LearningGames />
+              </StudyLayout>
+            </PageWrapper>
+          }
+        />
+        <Route
+          path="/study/video-notes"
+          element={
+            <PageWrapper>
+              <StudyLayout>
+                <VideoNotes />
               </StudyLayout>
             </PageWrapper>
           }
