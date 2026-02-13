@@ -129,7 +129,7 @@ Return response as JSON with this structure:
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: "google/gemini-2.5-flash",
+          model: "openai/gpt-5-mini",
           messages: [
             { role: "system", content: systemPrompt },
             { role: "user", content: `Generate personalized interview questions for ${jobRole} at ${difficulty} level.` },
@@ -182,7 +182,7 @@ Be encouraging but honest. Focus on helping them improve.`;
           Authorization: `Bearer ${LOVABLE_API_KEY}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ model: "google/gemini-2.5-flash", messages, temperature: 0.7 }),
+        body: JSON.stringify({ model: "openai/gpt-5-mini", messages, temperature: 0.7 }),
       });
 
       if (!response.ok) throw new Error(`AI Gateway error: ${response.status}`);
@@ -253,7 +253,7 @@ Be specific, encouraging, and actionable.`;
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: "google/gemini-2.5-flash",
+          model: "openai/gpt-5-mini",
           messages: [
             { role: "system", content: systemPrompt },
             { role: "user", content: JSON.stringify(conversationHistory) },

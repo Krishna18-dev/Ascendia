@@ -68,7 +68,7 @@ serve(async (req) => {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: "google/gemini-2.5-flash",
+          model: "openai/gpt-5-mini",
           messages: [
             { role: "system", content: systemPrompt },
             { role: "user", content: userPrompt }
@@ -102,7 +102,7 @@ serve(async (req) => {
     const content = aiData.choices?.[0]?.message?.content;
     
     if (!content) {
-      throw new Error("No content generated from Gemini API");
+      throw new Error("No content generated from AI API");
     }
     
     console.log("Content generated successfully");

@@ -69,7 +69,7 @@ Be encouraging, concise, and actionable. Format responses clearly with bullet po
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: "google/gemini-2.5-flash",
+          model: "openai/gpt-5-mini",
           messages: [
             { role: "system", content: systemPrompt },
             ...messages,
