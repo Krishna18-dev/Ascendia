@@ -32,11 +32,13 @@ const Dashboard = () => {
   const [profile, setProfile] = useState<{ full_name: string; learning_goals: string[] } | null>(null);
   const [loading, setLoading] = useState(true);
   const [totalAchievements, setTotalAchievements] = useState(0);
+  const [streak, setStreak] = useState(0);
 
   useEffect(() => {
     if (user) {
       fetchProfile();
       fetchAchievementsCount();
+      fetchStreak();
     }
   }, [user]);
 
@@ -68,6 +70,40 @@ const Dashboard = () => {
       setTotalAchievements(count || 0);
     } catch (error) {
       console.error("Error fetching achievements count:", error);
+    }
+  };
+
+  const fetchStreak = async () => {
+    try {
+      const { data, error } = await supabase
+        .from("user_statistics")
+        .select("date")
+        .eq("user_id", user?.id)
+        .order("date", { ascending: false });
+
+      if (error) throw error;
+      if (!data || data.length === 0) {
+        setStreak(0);
+        return;
+      }
+
+      let count = 0;
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      for (let i = 0; i < data.length; i++) {
+        const expected = new Date(today);
+        expected.setDate(expected.getDate() - i);
+        const entryDate = new Date(data[i].date + "T00:00:00");
+        if (entryDate.getTime() === expected.getTime()) {
+          count++;
+        } else {
+          break;
+        }
+      }
+      setStreak(count);
+    } catch (error) {
+      console.error("Error fetching streak:", error);
     }
   };
 
@@ -132,7 +168,7 @@ const Dashboard = () => {
                   <Calendar className="h-4 w-4 text-accent" />
                 </div>
               </div>
-              <p className="text-2xl sm:text-3xl font-display font-bold">7</p>
+              <p className="text-2xl sm:text-3xl font-display font-bold">{streak}</p>
               <p className="text-xs text-muted-foreground">Day streak</p>
             </div>
           </Card>
