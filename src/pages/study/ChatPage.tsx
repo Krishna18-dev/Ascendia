@@ -47,7 +47,27 @@ const ChatPage = () => {
         body: { messages: [...messages, userMessage] },
       });
 
-      if (error) throw error;
+      if (error) {
+        const errorMessage = error.message || "Failed to send message";
+        const isRateLimited = errorMessage.includes("429") || errorMessage.toLowerCase().includes("rate limit");
+
+        toast.error(
+          isRateLimited
+            ? "The AI is busy right now. Please wait a few seconds and try again."
+            : errorMessage
+        );
+
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: "assistant",
+            content: isRateLimited
+              ? "The AI service is busy right now, so I couldn’t answer that yet. Please wait a few seconds and send your message again."
+              : "I apologize, but I encountered an error. Please try again.",
+          },
+        ]);
+        return;
+      }
 
       const assistantMessage: Message = {
         role: "assistant",
@@ -57,13 +77,22 @@ const ChatPage = () => {
       setMessages((prev) => [...prev, assistantMessage]);
     } catch (error: any) {
       console.error("Error sending message:", error);
-      toast.error(error.message || "Failed to send message");
-      
+      const errorMessage = error?.message || "Failed to send message";
+      const isRateLimited = errorMessage.includes("429") || errorMessage.toLowerCase().includes("rate limit");
+
+      toast.error(
+        isRateLimited
+          ? "The AI is busy right now. Please wait a few seconds and try again."
+          : errorMessage
+      );
+
       setMessages((prev) => [
         ...prev,
         {
           role: "assistant",
-          content: "I apologize, but I encountered an error. Please try again.",
+          content: isRateLimited
+            ? "The AI service is busy right now, so I couldn’t answer that yet. Please wait a few seconds and send your message again."
+            : "I apologize, but I encountered an error. Please try again.",
         },
       ]);
     } finally {

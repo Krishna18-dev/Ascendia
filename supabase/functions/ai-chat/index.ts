@@ -7,6 +7,60 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function requestGeminiWithRetry(messages: Array<{ role: string; content: string }>, apiKey: string) {
+  const systemPrompt = `You are an AI Study Mentor — a friendly, knowledgeable, and encouraging learning companion. Your role is to help students understand concepts, solve problems, and improve their study skills.
+
+Guidelines:
+- Be conversational yet educational
+- Break down complex topics into simple explanations
+- Use examples, analogies, and real-world connections
+- Encourage critical thinking
+- Suggest study techniques when appropriate
+- Use markdown formatting for better readability
+- Include code examples with syntax highlighting when relevant
+- Be supportive and motivating`;
+
+  const geminiMessages = messages.map((m) => ({
+    role: m.role === "assistant" ? "model" : "user",
+    parts: [{ text: m.content }],
+  }));
+
+  let lastStatus = 500;
+  let lastBody = "";
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          system_instruction: { parts: [{ text: systemPrompt }] },
+          contents: geminiMessages,
+        }),
+      }
+    );
+
+    if (response.ok) {
+      return response.json();
+    }
+
+    lastStatus = response.status;
+    lastBody = await response.text();
+    console.error(`Gemini API error attempt ${attempt + 1}:`, response.status, lastBody);
+
+    if (response.status !== 429 || attempt === 2) {
+      break;
+    }
+
+    await sleep(1200 * (attempt + 1));
+  }
+
+  return { errorStatus: lastStatus, errorBody: lastBody };
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -29,48 +83,23 @@ serve(async (req) => {
       throw new Error("GEMINI_API_KEY is not configured");
     }
 
-    const systemPrompt = `You are an AI Study Mentor — a friendly, knowledgeable, and encouraging learning companion. Your role is to help students understand concepts, solve problems, and improve their study skills.
+    if (!GEMINI_API_KEY.startsWith("AIza")) {
+      throw new Error("Invalid GEMINI_API_KEY format. Keys must start with 'AIza'.");
+    }
 
-Guidelines:
-- Be conversational yet educational
-- Break down complex topics into simple explanations
-- Use examples, analogies, and real-world connections
-- Encourage critical thinking
-- Suggest study techniques when appropriate
-- Use markdown formatting for better readability
-- Include code examples with syntax highlighting when relevant
-- Be supportive and motivating`;
+    const data = await requestGeminiWithRetry(messages, GEMINI_API_KEY);
 
-    const geminiMessages = messages.map((m: any) => ({
-      role: m.role === "assistant" ? "model" : "user",
-      parts: [{ text: m.content }],
-    }));
-
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          system_instruction: { parts: [{ text: systemPrompt }] },
-          contents: geminiMessages,
-        }),
-      }
-    );
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error("Gemini API error:", response.status, errorText);
-      if (response.status === 429) {
+    if (data?.errorStatus) {
+      if (data.errorStatus === 429) {
         return new Response(
-          JSON.stringify({ error: "Rate limit exceeded. Please try again later." }),
+          JSON.stringify({ error: "The AI service is busy right now. Please wait a moment and try again." }),
           { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
-      throw new Error(`Gemini API error: ${response.status}`);
+
+      throw new Error(`Gemini API error: ${data.errorStatus}`);
     }
 
-    const data = await response.json();
     const content = data.candidates?.[0]?.content?.parts?.[0]?.text;
     if (!content) throw new Error("No content generated from Gemini API");
 
