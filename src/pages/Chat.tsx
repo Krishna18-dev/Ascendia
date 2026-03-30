@@ -28,7 +28,7 @@ const Chat = () => {
     {
       role: "assistant",
       content:
-        "Hi! I'm your AI Study Mentor powered by Gemini. I can help you with project ideas, learning paths, tool recommendations, YouTube learning resources, and any questions you have. What would you like to work on today?",
+        "Hi! I'm your AI Study Mentor. I can help you with project ideas, learning paths, tool recommendations, YouTube learning resources, and any questions you have. What would you like to work on today?",
       suggestions: [
         "Help me choose an AI tool for my project",
         "I need ideas for a school presentation",
@@ -150,7 +150,7 @@ const Chat = () => {
         <div className="text-center mb-8 animate-fade-in">
           <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary/10 border border-primary/20 text-sm font-medium text-primary mb-4">
             <Sparkles className="h-4 w-4" />
-            <span>AI Study Mentor • Powered by Gemini</span>
+            <span>AI Study Mentor • AI-Powered</span>
           </div>
           <h1 className="text-4xl font-bold mb-2">
             Your Personal{" "}
