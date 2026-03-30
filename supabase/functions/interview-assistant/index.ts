@@ -13,28 +13,46 @@ function extractTextFromBase64(base64: string, fileType: string): string {
   for (let i = 0; i < binaryStr.length; i++) {
     bytes[i] = binaryStr.charCodeAt(i);
   }
-
   if (fileType === 'text/plain' || fileType === 'application/pdf') {
-    // For PDF: extract readable ASCII text (simplified extraction)
     const text = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
     if (fileType === 'application/pdf') {
-      // Extract text between stream markers and readable content
-      const readable = text
-        .replace(/[^\x20-\x7E\n\r\t]/g, ' ')
-        .replace(/\s{3,}/g, '\n')
-        .split('\n')
-        .filter(line => line.trim().length > 3 && !/^[%\/\[\]<>{}()]+$/.test(line.trim()))
-        .join('\n')
-        .substring(0, 15000);
-      return readable;
+      return text.replace(/[^\x20-\x7E\n\r\t]/g, ' ').replace(/\s{3,}/g, '\n')
+        .split('\n').filter(line => line.trim().length > 3 && !/^[%\/\[\]<>{}()]+$/.test(line.trim()))
+        .join('\n').substring(0, 15000);
     }
     return text.substring(0, 15000);
   }
-
-  // For DOCX: extract text from XML content
   const text = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
-  const xmlText = text.replace(/<[^>]+>/g, ' ').replace(/[^\x20-\x7E\n\r\t]/g, ' ').replace(/\s+/g, ' ').trim();
-  return xmlText.substring(0, 15000);
+  return text.replace(/<[^>]+>/g, ' ').replace(/[^\x20-\x7E\n\r\t]/g, ' ').replace(/\s+/g, ' ').trim().substring(0, 15000);
+}
+
+async function callGemini(systemPrompt: string, userPrompt: string, apiKey: string, jsonMode = false) {
+  const body: any = {
+    system_instruction: { parts: [{ text: systemPrompt }] },
+    contents: [{ role: "user", parts: [{ text: userPrompt }] }],
+  };
+  if (jsonMode) {
+    body.generationConfig = { responseMimeType: "application/json" };
+  }
+
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }
+  );
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error("Gemini API error:", response.status, errorText);
+    if (response.status === 429) {
+      throw { status: 429, message: "Rate limit exceeded. Please try again later." };
+    }
+    throw new Error(`Gemini API error: ${response.status}`);
+  }
+
+  const data = await response.json();
+  const content = data.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!content) throw new Error("No content generated from Gemini API");
+  return content;
 }
 
 serve(async (req) => {
@@ -68,8 +86,8 @@ serve(async (req) => {
     const { action, jobRole, difficulty, resumeBase64, resumeFileType, conversationHistory, sessionData } = await req.json();
     console.log("Interview assistant:", { action, jobRole, difficulty });
 
-    const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
-    if (!OPENAI_API_KEY) throw new Error("OPENAI_API_KEY is not configured");
+    const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
+    if (!GEMINI_API_KEY) throw new Error("GEMINI_API_KEY is not configured");
 
     if (action === "start") {
       let resumeText = "";
@@ -80,115 +98,38 @@ serve(async (req) => {
       const questionCounts: Record<string, number> = { easy: 5, medium: 6, hard: 7 };
       const numQuestions = questionCounts[difficulty] || 6;
 
-      const systemPrompt = `You are an expert technical interviewer.
+      const systemPrompt = `You are an expert technical interviewer. The candidate has applied for: ${jobRole}
 
-The candidate has applied for the role: ${jobRole}
+${resumeText ? `Resume:\n${resumeText}\n\nGenerate ${numQuestions} interview questions at ${difficulty} difficulty based on the resume.` : `Generate ${numQuestions} interview questions for ${jobRole} at ${difficulty} difficulty.`}
 
-${resumeText ? `Here is the candidate's resume text:\n${resumeText}\n\nBased STRICTLY on:
-- Skills mentioned in the resume
-- Projects listed
-- Technologies used
-- Experience level
-- Education background
+For each question provide the question, type (technical/behavioral/scenario), and a strong model answer.
+${resumeText ? `Also provide resumeAnalysis with extractedSkills, experienceLevel, and strengths.` : ''}
 
-Generate ${numQuestions} interview questions at ${difficulty} difficulty.` : `Generate ${numQuestions} interview questions for ${jobRole} at ${difficulty} difficulty.`}
-
-For each question:
-- Provide the interview question
-- Provide a strong, realistic model answer tailored specifically to the resume content
-- Keep answers aligned with candidate experience
-- Avoid generic textbook answers
-- Make questions practical and scenario-based when possible
-- Reference specific technologies, projects, and skills from the resume
-
-${resumeText ? `Also provide a brief resume analysis with:
-- extractedSkills: array of key skills found
-- experienceLevel: "Junior", "Mid", or "Senior" based on the resume
-- strengths: array of 3 key strength areas` : ''}
-
-Return response as JSON with this structure:
+Return JSON:
 {
-  "questions": [
-    {
-      "question": "Question text referencing resume content",
-      "type": "technical | behavioral | scenario",
-      "modelAnswer": "Strong tailored answer based on resume"
-    }
-  ]${resumeText ? `,
-  "resumeAnalysis": {
-    "extractedSkills": ["skill1", "skill2"],
-    "experienceLevel": "Junior|Mid|Senior",
-    "strengths": ["strength1", "strength2", "strength3"]
-  }` : ''}
+  "questions": [{ "question": "...", "type": "technical|behavioral|scenario", "modelAnswer": "..." }]${resumeText ? `,
+  "resumeAnalysis": { "extractedSkills": [], "experienceLevel": "Junior|Mid|Senior", "strengths": [] }` : ''}
 }`;
 
-      const response = await fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${OPENAI_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: "gpt-4o-mini",
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: `Generate personalized interview questions for ${jobRole} at ${difficulty} level.` },
-          ],
-          response_format: { type: "json_object" },
-          temperature: 0.8,
-        }),
-      });
+      const content = await callGemini(systemPrompt, `Generate personalized interview questions for ${jobRole} at ${difficulty} level.`, GEMINI_API_KEY, true);
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error("AI Gateway error:", response.status, errorText);
-        if (response.status === 429) {
-          return new Response(JSON.stringify({ error: "Rate limit exceeded. Please try again later." }),
-            { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-        }
-        if (response.status === 402) {
-          return new Response(JSON.stringify({ error: "Payment required. Please add credits." }),
-            { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-        }
-        throw new Error(`AI Gateway error: ${response.status}`);
-      }
+      await supabaseClient.rpc('upsert_daily_stats', { p_user_id: user.id, p_study_minutes: 15, p_courses: 0 });
 
-      const data = await response.json();
-      const content = JSON.parse(data.choices[0].message.content);
-
-      await supabaseClient.rpc('upsert_daily_stats', {
-        p_user_id: user.id, p_study_minutes: 15, p_courses: 0
-      });
-
-      return new Response(JSON.stringify(content), {
+      return new Response(JSON.stringify(JSON.parse(content)), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
 
     } else if (action === "evaluate") {
       const systemPrompt = `You are an experienced interviewer providing constructive feedback.
 Analyze the candidate's answer and provide:
-1. Strengths (what they did well)
+1. Strengths
 2. Areas for improvement
 3. A rating from 1-5
-4. Specific suggestions for better answers
+4. Specific suggestions
+Be encouraging but honest.`;
 
-Be encouraging but honest. Focus on helping them improve.`;
-
-      const messages = [{ role: "system", content: systemPrompt }, ...conversationHistory];
-
-      const response = await fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${OPENAI_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ model: "gpt-4o-mini", messages, temperature: 0.7 }),
-      });
-
-      if (!response.ok) throw new Error(`AI Gateway error: ${response.status}`);
-
-      const data = await response.json();
-      const feedback = data.choices[0].message.content;
+      const userPrompt = JSON.stringify(conversationHistory);
+      const feedback = await callGemini(systemPrompt, userPrompt, GEMINI_API_KEY);
 
       if (sessionData) {
         const score = Math.floor(Math.random() * 30) + 70;
@@ -201,7 +142,6 @@ Be encouraging but honest. Focus on helping them improve.`;
         if (!saveError) {
           const { count } = await supabaseClient.from('interview_sessions')
             .select('*', { count: 'exact', head: true }).eq('user_id', user.id);
-
           if (count === 1) {
             const { data: achievement } = await supabaseClient.from('achievements')
               .select('id').eq('name', 'Interview Ready').maybeSingle();
@@ -222,50 +162,18 @@ Be encouraging but honest. Focus on helping them improve.`;
       });
 
     } else if (action === "final-feedback") {
-      const systemPrompt = `You are a senior interview coach providing final interview feedback.
-
-Given the interview questions, the candidate's answers, and per-question feedback, provide a comprehensive final report in Markdown:
-
+      const systemPrompt = `You are a senior interview coach providing final feedback in Markdown:
 ## Overall Performance
-Brief overall assessment with a score out of 100.
-
 ## Strengths
-- Key things the candidate did well
-
 ## Areas for Improvement
-- Specific topics and skills to work on
-
 ## Topics to Revise
-- Concrete topics the candidate should study
-
 ## ATS Score Estimate
-Provide a simulated ATS compatibility score (0-100) based on keyword alignment with the role.
-
 ## Action Plan
-- 3-5 specific next steps to improve
-
 Be specific, encouraging, and actionable.`;
 
-      const response = await fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${OPENAI_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: "gpt-4o-mini",
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: JSON.stringify(conversationHistory) },
-          ],
-          temperature: 0.7,
-        }),
-      });
+      const feedback = await callGemini(systemPrompt, JSON.stringify(conversationHistory), GEMINI_API_KEY);
 
-      if (!response.ok) throw new Error(`AI Gateway error: ${response.status}`);
-      const data = await response.json();
-
-      return new Response(JSON.stringify({ feedback: data.choices[0].message.content }), {
+      return new Response(JSON.stringify({ feedback }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
@@ -273,7 +181,12 @@ Be specific, encouraging, and actionable.`;
     return new Response(JSON.stringify({ error: "Invalid action" }), {
       status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
-  } catch (error) {
+  } catch (error: any) {
+    if (error?.status === 429) {
+      return new Response(JSON.stringify({ error: error.message }), {
+        status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
     console.error("Error in interview-assistant:", error);
     return new Response(
       JSON.stringify({ error: error instanceof Error ? error.message : "Unknown error" }),
