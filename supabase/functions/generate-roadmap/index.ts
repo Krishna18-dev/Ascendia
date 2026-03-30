@@ -15,107 +15,76 @@ serve(async (req) => {
     const { goal, currentLevel, timeframe } = await req.json();
     console.log("Generating roadmap for:", { goal, currentLevel, timeframe });
 
-    const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
-    if (!OPENAI_API_KEY) {
-      throw new Error("OPENAI_API_KEY is not configured");
+    const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
+    if (!GEMINI_API_KEY) {
+      throw new Error("GEMINI_API_KEY is not configured");
     }
 
     const systemPrompt = `You are an expert learning advisor who creates personalized, structured learning roadmaps. 
-Create a detailed ${timeframe}-month learning roadmap that helps the user achieve their goal.
-
-Format your response as a JSON object with this structure:
+Create a detailed ${timeframe}-month learning roadmap. Return ONLY valid JSON with this structure:
 {
   "title": "Learning Roadmap Title",
-  "overview": "Brief overview of the learning journey (2-3 sentences)",
+  "overview": "Brief overview (2-3 sentences)",
   "totalDuration": "${timeframe} months",
   "milestones": [
     {
       "month": 1,
       "title": "Phase Title",
-      "description": "What will be learned in this phase",
-      "topics": ["Topic 1", "Topic 2", "Topic 3"],
-      "projects": ["Project 1", "Project 2"],
-      "resources": ["Resource recommendation 1", "Resource recommendation 2"],
-      "outcome": "What the learner will achieve by the end"
+      "description": "What will be learned",
+      "topics": ["Topic 1", "Topic 2"],
+      "projects": ["Project 1"],
+      "resources": ["Resource 1"],
+      "outcome": "What the learner achieves"
     }
   ],
   "weeklySchedule": {
     "hoursPerWeek": 10,
-    "breakdown": {
-      "theory": "40%",
-      "practice": "40%", 
-      "projects": "20%"
-    }
+    "breakdown": { "theory": "40%", "practice": "40%", "projects": "20%" }
   },
-  "skills": ["Skill 1", "Skill 2", "Skill 3"],
-  "careerPaths": ["Career option 1", "Career option 2"]
-}
-
-Consider the user's current level when creating milestones. Ensure progression is logical and achievable.`;
+  "skills": ["Skill 1", "Skill 2"],
+  "careerPaths": ["Career 1", "Career 2"]
+}`;
 
     const userPrompt = `Create a ${timeframe}-month learning roadmap for:
 Goal: ${goal}
 Current Level: ${currentLevel}
+Make it practical and tailored to their level. Return ONLY valid JSON.`;
 
-Make it practical, actionable, and tailored to their current level. Include specific topics, projects, and resources.`;
-
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${OPENAI_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "gpt-4o-mini",
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userPrompt },
-        ],
-        response_format: { type: "json_object" },
-        temperature: 0.7,
-      }),
-    });
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          system_instruction: { parts: [{ text: systemPrompt }] },
+          contents: [{ role: "user", parts: [{ text: userPrompt }] }],
+          generationConfig: { responseMimeType: "application/json" },
+        }),
+      }
+    );
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error("AI Gateway error:", response.status, errorText);
-      
+      console.error("Gemini API error:", response.status, errorText);
       if (response.status === 429) {
-        return new Response(
-          JSON.stringify({ error: "Rate limit exceeded. Please try again later." }),
-          { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
+        return new Response(JSON.stringify({ error: "Rate limit exceeded. Please try again later." }), { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
-      
-      if (response.status === 402) {
-        return new Response(
-          JSON.stringify({ error: "Payment required. Please add credits to continue." }),
-          { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-
-      throw new Error(`AI Gateway error: ${response.status}`);
+      throw new Error(`Gemini API error: ${response.status}`);
     }
 
     const data = await response.json();
-    const content = data.choices[0].message.content;
-    
+    const content = data.candidates?.[0]?.content?.parts?.[0]?.text;
     console.log("Generated roadmap successfully");
 
     return new Response(
       JSON.stringify({ roadmap: JSON.parse(content) }),
-      {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      }
+      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (error) {
-    console.error("Error in generate-roadmap function:", error);
+    console.error("Error in generate-roadmap:", error);
     return new Response(
       JSON.stringify({ error: error instanceof Error ? error.message : "Unknown error" }),
-      {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      }
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }
 });

@@ -22,9 +22,7 @@ function extractVideoId(url: string): string | null {
 }
 
 async function fetchVideoMetadata(videoId: string, apiKey: string) {
-  const res = await fetch(
-    `https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails&id=${videoId}&key=${apiKey}`
-  );
+  const res = await fetch(`https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails&id=${videoId}&key=${apiKey}`);
   const data = await res.json();
   if (!data.items || data.items.length === 0) return null;
   const item = data.items[0];
@@ -46,9 +44,7 @@ function parseDuration(iso: string): number {
 function formatDuration(iso: string): string {
   const match = iso.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
   if (!match) return "Unknown";
-  const h = parseInt(match[1] || '0');
-  const m = parseInt(match[2] || '0');
-  const s = parseInt(match[3] || '0');
+  const h = parseInt(match[1] || '0'), m = parseInt(match[2] || '0'), s = parseInt(match[3] || '0');
   if (h > 0) return `${h}h ${m}m ${s}s`;
   if (m > 0) return `${m}m ${s}s`;
   return `${s}s`;
@@ -56,36 +52,27 @@ function formatDuration(iso: string): string {
 
 async function fetchTranscript(videoId: string): Promise<string | null> {
   try {
-    // Try fetching from a public transcript endpoint
     const res = await fetch(`https://www.youtube.com/watch?v=${videoId}`);
     const html = await res.text();
-    
-    // Extract captions track URL from the page
     const captionMatch = html.match(/"captionTracks":\[(.*?)\]/);
     if (!captionMatch) return null;
-    
     const captionData = JSON.parse(`[${captionMatch[1]}]`);
     const track = captionData.find((t: any) => t.languageCode === 'en') || captionData[0];
     if (!track?.baseUrl) return null;
-    
     const captionRes = await fetch(track.baseUrl + '&fmt=json3');
     const captionJson = await captionRes.json();
-    
     if (!captionJson.events) return null;
-    
-    const segments = captionJson.events
+    return captionJson.events
       .filter((e: any) => e.segs)
       .map((e: any) => {
         const time = Math.floor((e.tStartMs || 0) / 1000);
-        const mins = Math.floor(time / 60);
-        const secs = time % 60;
+        const mins = Math.floor(time / 60), secs = time % 60;
         const timestamp = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
         const text = e.segs.map((s: any) => s.utf8).join('').trim();
         return text ? `[${timestamp}] ${text}` : '';
       })
-      .filter(Boolean);
-    
-    return segments.join('\n');
+      .filter(Boolean)
+      .join('\n');
   } catch (e) {
     console.error('Transcript fetch error:', e);
     return null;
@@ -103,197 +90,93 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_ANON_KEY') ?? '',
       { global: { headers: { Authorization: req.headers.get('Authorization')! } } }
     );
-
     const { data: authData } = await supabaseClient.auth.getUser();
     const user = authData?.user ?? null;
 
     const { url, includeExecutionPlan, saveToLibrary } = await req.json();
-    
     if (!url) {
-      return new Response(JSON.stringify({ error: "URL is required" }), {
-        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" }
-      });
+      return new Response(JSON.stringify({ error: "URL is required" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
     const videoId = extractVideoId(url);
     if (!videoId) {
-      return new Response(JSON.stringify({ error: "Invalid YouTube URL. Please provide a valid YouTube video link." }), {
-        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" }
-      });
+      return new Response(JSON.stringify({ error: "Invalid YouTube URL." }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    // Fetch metadata
     const YOUTUBE_API_KEY = Deno.env.get("YOUTUBE_API_KEY");
     let metadata: any = null;
-    if (YOUTUBE_API_KEY) {
-      metadata = await fetchVideoMetadata(videoId, YOUTUBE_API_KEY);
-    }
-    
+    if (YOUTUBE_API_KEY) metadata = await fetchVideoMetadata(videoId, YOUTUBE_API_KEY);
     if (!metadata) {
-      return new Response(JSON.stringify({ error: "Could not fetch video information. The video may be private or unavailable." }), {
-        status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" }
-      });
+      return new Response(JSON.stringify({ error: "Could not fetch video information." }), { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    // Check duration limit (2 hours)
     const durationMinutes = parseDuration(metadata.duration);
     if (durationMinutes > 120) {
-      return new Response(JSON.stringify({ error: "Video is too long (over 2 hours). Please choose a shorter video." }), {
-        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" }
-      });
+      return new Response(JSON.stringify({ error: "Video is too long (over 2 hours)." }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    // Fetch transcript
     const transcript = await fetchTranscript(videoId);
-    
-    const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
-    if (!OPENAI_API_KEY) {
-      throw new Error("OPENAI_API_KEY is not configured");
-    }
 
-    const videoContext = transcript 
-      ? `Video Transcript:\n${transcript}`
-      : `Video Description (no transcript available):\n${metadata.description}`;
+    const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
+    if (!GEMINI_API_KEY) throw new Error("GEMINI_API_KEY is not configured");
 
-    let systemPrompt = `You are an expert note-taking assistant that generates comprehensive, structured study notes from YouTube videos. Your notes must be detailed, actionable, and formatted in clean Markdown.`;
+    const videoContext = transcript ? `Video Transcript:\n${transcript}` : `Video Description:\n${metadata.description}`;
 
     let userPrompt = `Generate structured notes for this YouTube video:
-
 **Title:** ${metadata.title}
 **Channel:** ${metadata.channel}
 **Duration:** ${formatDuration(metadata.duration)}
 
 ${videoContext}
 
-Format the output EXACTLY like this structure:
-
-# 📌 ${metadata.title}
-**${metadata.channel}** | ${formatDuration(metadata.duration)}
-
-## 🔹 Quick Summary
-Write a concise 2-3 sentence summary of the video content.
-
-## 🧠 Key Concepts
-- List the main concepts/ideas covered
-- Each as a bullet point with brief explanation
-
-## 📝 Detailed Notes
-Break down the content section by section with detailed explanations. Use subheadings for each major topic.
-
-## 💻 Code Examples
-(If the video is technical, include relevant code snippets with proper syntax highlighting. If not technical, write "No code examples in this video.")
-
-## ⏱ Important Timestamps
-List key moments with timestamps in format:
-- **00:02:15** – Topic Name
-- **00:05:30** – Another Topic
-
-## ✅ Action Plan
-Create a step-by-step executable plan on how to apply what was learned:
-1. Step one
-2. Step two
-3. etc.`;
+Format with: Quick Summary, Key Concepts, Detailed Notes, Code Examples (if technical), Important Timestamps, and Action Plan.`;
 
     if (includeExecutionPlan) {
-      userPrompt += `
-
-Additionally, generate a detailed execution plan:
-
-## 🎯 Goal Breakdown
-Break the learning objectives into measurable goals.
-
-## 📅 7-Day Learning Plan
-Day-by-day plan to master the content.
-
-## 🛠 Required Tools
-List all tools, software, or resources needed.
-
-## 📚 Recommended Practice Tasks
-Specific exercises to practice what was learned.
-
-## 🔁 Revision Strategy
-How to review and retain the knowledge.
-
-## 🧪 Mini Project Suggestion
-A small project to apply the knowledge practically.
-
-## 📊 Self-Evaluation Checklist
-- [ ] Checklist items to verify understanding
-- [ ] Include specific knowledge checks`;
+      userPrompt += `\n\nAlso include: Goal Breakdown, 7-Day Learning Plan, Required Tools, Practice Tasks, Revision Strategy, Mini Project, Self-Evaluation Checklist.`;
     }
 
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${OPENAI_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "gpt-4o-mini",
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userPrompt },
-        ],
-      }),
-    });
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          system_instruction: { parts: [{ text: "You are an expert note-taking assistant that generates comprehensive, structured study notes from YouTube videos in clean Markdown." }] },
+          contents: [{ role: "user", parts: [{ text: userPrompt }] }],
+        }),
+      }
+    );
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error("AI error:", response.status, errorText);
+      console.error("Gemini API error:", response.status, errorText);
       if (response.status === 429) {
-        return new Response(JSON.stringify({ error: "Rate limit exceeded. Please try again later." }), {
-          status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" }
-        });
+        return new Response(JSON.stringify({ error: "Rate limit exceeded." }), { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
-      if (response.status === 402) {
-        return new Response(JSON.stringify({ error: "AI usage limit reached. Please add credits." }), {
-          status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" }
-        });
-      }
-      throw new Error(`AI error: ${response.status}`);
+      throw new Error(`Gemini API error: ${response.status}`);
     }
 
     const aiData = await response.json();
-    const content = aiData.choices?.[0]?.message?.content;
+    const content = aiData.candidates?.[0]?.content?.parts?.[0]?.text;
     if (!content) throw new Error("No content generated");
 
-    // Save to library if requested
     if (saveToLibrary && user) {
       await supabaseClient.from('saved_content').insert({
-        user_id: user.id,
-        content_type: 'video-notes',
-        topic: metadata.title,
-        content,
+        user_id: user.id, content_type: 'video-notes', topic: metadata.title, content,
         metadata: { videoId, channel: metadata.channel, duration: metadata.duration, url, includeExecutionPlan }
       });
     }
 
-    // Update study stats
     if (user) {
-      await supabaseClient.rpc('upsert_daily_stats', {
-        p_user_id: user.id,
-        p_study_minutes: Math.max(5, Math.floor(durationMinutes / 4)),
-        p_courses: 0
-      });
+      await supabaseClient.rpc('upsert_daily_stats', { p_user_id: user.id, p_study_minutes: Math.max(5, Math.floor(durationMinutes / 4)), p_courses: 0 });
     }
 
     return new Response(JSON.stringify({
       content,
-      metadata: {
-        title: metadata.title,
-        channel: metadata.channel,
-        duration: formatDuration(metadata.duration),
-        thumbnail: metadata.thumbnail,
-        videoId,
-        hasTranscript: !!transcript,
-      }
-    }), {
-      headers: { ...corsHeaders, "Content-Type": "application/json" }
-    });
+      metadata: { title: metadata.title, channel: metadata.channel, duration: formatDuration(metadata.duration), thumbnail: metadata.thumbnail, videoId, hasTranscript: !!transcript }
+    }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (error) {
     console.error("Error in youtube-notes:", error);
-    return new Response(JSON.stringify({ error: error instanceof Error ? error.message : "Unknown error" }), {
-      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" }
-    });
+    return new Response(JSON.stringify({ error: error instanceof Error ? error.message : "Unknown error" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   }
 });
