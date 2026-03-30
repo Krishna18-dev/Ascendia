@@ -16,7 +16,7 @@ const ChatPage = () => {
   const [messages, setMessages] = useState<Message[]>([
     {
       role: "assistant",
-      content: "Hi! I'm your AI Study Companion powered by Gemini. Ask me anything about your studies, career prep, or learning goals. I can help with study notes, roadmaps, practice questions, and interview prep!",
+      content: "Hi! I'm your AI Study Companion. Ask me anything about your studies, career prep, or learning goals. I can help with study notes, roadmaps, practice questions, and interview prep!",
     },
   ]);
   const [message, setMessage] = useState("");
